@@ -27,7 +27,7 @@ if "chat" not in st.session_state:
     Warmly defer practical halachic questions to a Rabbi.
     """
     st.session_state.chat = client.chats.create(
-        model="gemini-3.5-flash",
+        model="gemini-1.5-pro",
         config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.7)
     )
 
