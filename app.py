@@ -11,7 +11,9 @@ st.caption("Learn Torah anytime, anywhere.")
 
 # Securely initialize Gemini Client from deployment environment variables
 if "GEMINI_API_KEY" in st.secrets:
-    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    if "client" not in st.session_state:
+        st.session_state.client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    client = st.session_state.client
 else:
     st.error("Please configure your GEMINI_API_KEY in the dashboard secrets.")
     st.stop()
