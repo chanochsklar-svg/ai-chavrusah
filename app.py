@@ -40,8 +40,16 @@ def fetch_sefaria(ref):
         # Check if version data exists safely
         if data.get("versions") and len(data["versions"]) > 0:
             text_data = data["versions"][0].get("text", [])
-            en_text = " ".join(text_data) if isinstance(text_data, list) else str(text_data)
-        return f"Source: {data.get('title', ref)}\nText: {en_text}"
+            if isinstance(text_data, list):
+                # Flattens nested list blocks if Sefaria returns list-of-lists
+                flat_list = [
+                    " ".join(item) if isinstance(item, list) else str(item) 
+                    for item in text_data
+                ]
+                en_text = " ".join(flat_list)
+            else:
+                en_text = str(text_data)
+            return f"Source: {data.get('title', ref)}\n\nText: {en_text}"
     return "Text not found."
 
 # 1. Text Selection Setup
