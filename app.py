@@ -21,7 +21,7 @@ system_instruction = (
     "You are an expert, patient, and engaging AI Chavrusah (Torah study partner). "
     "Your goal is to learn Jewish texts deeply with the user, following the classical traditional style of study. "
     "Maintain an encouraging, analytical, and thoughtful tone. Focus heavily on textual clarity, conceptual flow, "
-    "and extracting practical life wisdom from the text. Always support your points with logical evidence from the commentators."
+    "and extracting practical life wisdom from the text."
 )
 
 # Initialize Session Message Arrays
@@ -58,11 +58,10 @@ if text_to_study and "primed" not in st.session_state:
     with st.spinner("Fetching from Sefaria..."):
         source_material = fetch_sefaria(text_to_study)
         priming_prompt = f"Here is our text:\n\n{source_material}\n\nIntroduce yourself, read/translate the first line, and kick off our conversation."
-        
         st.session_state.messages.append({"role": "user", "content": priming_prompt})
         
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model="llama-3.3-70b-versatile",
             messages=st.session_state.messages,
             temperature=0.7,
         )
@@ -79,13 +78,14 @@ for role, text in st.session_state.chat_history:
 st.write("---")
 st.subheader("🎤 Speak or Type Your Answer")
 
-# Feature 1: Built-in Microphone Widget
+# Audio Input Widgets
 audio_file = st.audio_input("Click the circle icon to record your voice:")
 user_typed = st.chat_input("Or type your response here...")
 
 user_message = None
+bot_reply = None
 
-# If the user speaks, use Groq's high-speed Whisper model to translate it into text automatically
+# Audio Processing via Whisper
 if audio_file is not None:
     with st.spinner("Transcribing your voice..."):
         try:
@@ -97,11 +97,10 @@ if audio_file is not None:
         except Exception as e:
             st.error(f"Voice processing error: {e}")
 
-# If they chose to type instead, use the typed text
 if user_typed:
     user_message = user_typed
 
-# Process the message if we have input from either source
+# Process message and generate text response
 if user_message:
     with st.chat_message("user"):
         st.write(user_message)
@@ -110,7 +109,7 @@ if user_message:
 
     with st.spinner("Chavrusah is thinking..."):
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model="llama-3.3-70b-versatile",
             messages=st.session_state.messages,
             temperature=0.7,
         )
@@ -118,17 +117,89 @@ if user_message:
         
     with st.chat_message("assistant"):
         st.write(bot_reply)
-        
-        # Feature 2: Make the AI talk back using an invisible HTML5 speech player
-        # This loops the text directly into the user's browser speakers
-        escaped_reply = bot_reply.replace("'", "\\'").replace("\n", " ")
-        tts_html = f"""
-        <script>
-            var msg = new SpeechSynthesisUtterance('{escaped_reply}');
-            window.speechSynthesis.speak(msg);
-        </script>
-        """
-        st.components.v1.html(tts_html, height=0)
-        
     st.session_state.messages.append({"role": "assistant", "content": bot_reply})
     st.session_state.chat_history.append(("assistant", bot_reply))
+
+# --- VOICE MANAGER PANEL (Pause, Resume, Stop & Voice Select) ---
+st.write("### 🎛️ Audio Controls")
+
+# Prepare text for injection
+speech_text = bot_reply if bot_reply else (st.session_state.chat_history[-1][1] if st.session_state.chat_history else "")
+escaped_reply = speech_text.replace("'", "\\'").replace("\n", " ")
+
+audio_panel_html = f"""
+<div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-family: sans-serif;">
+    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose a Voice:</label>
+    <select id="voiceSelect" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 12px;"></select>
+    
+    <div style="display: flex; gap: 10px;">
+        <button id="btnPause" style="flex: 1; padding: 10px; background-color: #ffc107; color: black; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">⏸️ Pause</button>
+        <button id="btnResume" style="flex: 1; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">▶️ Resume</button>
+        <button id="btnStop" style="flex: 1; padding: 10px; background-color: #dc3545; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">🛑 Stop</button>
+    </div>
+</div>
+
+<script>
+    var synth = window.speechSynthesis;
+    var voiceSelect = document.getElementById('voiceSelect');
+    var textToSpeak = "{escaped_reply}";
+    var currentUtterance = null;
+
+    function populateVoiceList() {{
+        var voices = synth.getVoices();
+        voiceSelect.innerHTML = '';
+        voices.forEach(function(voice, i) {{
+            // Only show English voices to keep choices clean for learning
+            if (voice.lang.includes('en')) {{
+                var option = document.createElement('option');
+                option.textContent = voice.name + ' (' + voice.lang + ')';
+                option.value = i;
+                voiceSelect.appendChild(option);
+            }}
+        }});
+    }}
+
+    populateVoiceList();
+    if (synth.onvoiceschanged !== undefined) {{
+        synth.onvoiceschanged = populateVoiceList;
+    }}
+
+    // Auto-Speak when a new response arrives
+    if (textToSpeak.trim() !== "") {{
+        synth.cancel(); // Stop any leftover audio strings
+        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        
+        // Apply selected voice if list is populated
+        var voices = synth.getVoices();
+        if(voices.length > 0 && voiceSelect.value !== "") {{
+            currentUtterance.voice = voices[voiceSelect.value];
+        }}
+        synth.speak(currentUtterance);
+    }}
+
+    // Control Selectors
+    document.getElementById('btnPause').addEventListener('click', function() {{
+        synth.pause();
+    }});
+    document.getElementById('btnResume').addEventListener('click', function() {{
+        synth.resume();
+    }});
+    document.getElementById('btnStop').addEventListener('click', function() {{
+        synth.cancel();
+    }});
+    
+    // Reroute playback if user actively switches the voice list dropdown mid-session
+    voiceSelect.addEventListener('change', function() {{
+        synth.cancel();
+        if (textToSpeak.trim() !== "") {{
+            currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+            var voices = synth.getVoices();
+            currentUtterance.voice = voices[voiceSelect.value];
+            synth.speak(currentUtterance);
+        }}
+    }});
+</script>
+"""
+
+# Render controller frame dynamically
+st.components.v1.html(audio_panel_html, height=120)
