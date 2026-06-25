@@ -1,38 +1,37 @@
 import streamlit as st
 import requests
-from google import genai
-from google.genai import types
+from groq import Groq
 
-st.set_page_config(page_title="AI Chavrusah", page_icon="📜")
-
-# Title of your app
+# Page Setup
+st.set_page_config(page_title="On-Demand AI Chavrusah", page_icon="📜")
 st.title("📜 On-Demand AI Chavrusah")
 st.caption("Learn Torah anytime, anywhere.")
 
-# Securely initialize Gemini Client from deployment environment variables
-if "GEMINI_API_KEY" in st.secrets:
+# Secure Client Memory Setup
+if "GROQ_API_KEY" in st.secrets:
     if "client" not in st.session_state:
-        st.session_state.client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        st.session_state.client = Groq(api_key=st.secrets["GROQ_API_KEY"])
     client = st.session_state.client
 else:
-    st.error("Please configure your GEMINI_API_KEY in the dashboard secrets.")
+    st.error("Please configure your GROQ_API_KEY in the dashboard secrets.")
     st.stop()
 
-# Initialize session history so the app remembers the conversation
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "chat" not in st.session_state:
-    system_instruction = """
-    You are a warm, brilliant, and deeply collaborative Yeshiva Chavrusah (study partner).
-    You learn AS A PEER, not as a teacher. Translate phrases naturally, explain meaning simply,
-    and share classic commentary (like Rashi). Keep it short and highly conversational.
-    Warmly defer practical halachic questions to a Rabbi.
-    """
-    st.session_state.chat = client.chats.create(
-        model="gemini-2.5-flash",
-        config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.7)
-    )
+# Fixed System Prompt
+system_instruction = (
+    "You are an expert, patient, and engaging AI Chavrusah (Torah study partner). "
+    "Your goal is to learn Jewish texts deeply with the user, following the classical traditional style of study. "
+    "Maintain an encouraging, analytical, and thoughtful tone. Focus heavily on textual clarity, conceptual flow, "
+    "and extracting practical life wisdom from the text. Always support your points with logical evidence from the commentators."
+)
 
+# Initialize Session Message Arrays
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "system", "content": system_instruction}]
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# Sefaria Text Loader Block
 def fetch_sefaria(ref):
     url = f"https://www.sefaria.org/api/v3/texts/{ref.strip().replace(' ', '%20')}"
     res = requests.get(url)
@@ -55,31 +54,48 @@ def fetch_sefaria(ref):
     return "Text not found."
 
 # 1. Text Selection Setup
-text_to_study = st.text_input("What text would you like to learn today?", placeholder="e.g., Genesis 1, Pirkei Avot 1")
+text_to_study = st.text_input("What text would you like to learn today?", placeholder="e.g., Sukkah 2a, Genesis 1")
 
 if text_to_study and "primed" not in st.session_state:
     with st.spinner("Fetching from Sefaria..."):
         source_material = fetch_sefaria(text_to_study)
         priming_prompt = f"Here is our text:\n\n{source_material}\n\nIntroduce yourself, read/translate the first line, and kick off our conversation."
-        response = st.session_state.chat.send_message(priming_prompt)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        
+        # Append user text trigger to conversation stream
+        st.session_state.messages.append({"role": "user", "content": priming_prompt})
+        
+        # Request completion loop from Groq (using the production gpt-oss-120b model)
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=st.session_state.messages,
+            temperature=0.7,
+        )
+        bot_reply = response.choices[0].message.content
+        st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+        st.session_state.chat_history.append(("assistant", bot_reply))
         st.session_state.primed = True
 
-# 2. Render Chat Interface
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+# 2. Ongoing Chat Interface Display Loop
+for role, text in st.session_state.chat_history:
+    with st.chat_message(role):
+        st.write(text)
 
-# 3. Audio & Text Interaction Input
-user_input = st.chat_input("Type or use your keyboard's microphone button to talk out loud...")
-
-if user_input:
+# User Chat Response Execution
+if user_message := st.chat_input("Type or use your keyboard's microphone button to talk out loud..."):
     with st.chat_message("user"):
-        st.write(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    
+        st.write(user_message)
+    st.session_state.chat_history.append(("user", user_message))
+    st.session_state.messages.append({"role": "user", "content": user_message})
+
+    with st.spinner("Thinking..."):
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=st.session_state.messages,
+            temperature=0.7,
+        )
+        bot_reply = response.choices[0].message.content
+        
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = st.session_state.chat.send_message(user_input)
-            st.write(response.text)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
+        st.write(bot_reply)
+    st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+    st.session_state.chat_history.append(("assistant", bot_reply))
