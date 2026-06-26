@@ -53,9 +53,9 @@ def fetch_sefaria(ref):
 # Text Selection Setup
 text_to_study = st.text_input("What text would you like to learn today?", placeholder="e.g., Sukkah 2a, Genesis 1")
 
-# Helper function to generate real human speech via ElevenLabs
+# Helper function to generate real human speech via ElevenLabs with Safety Net
 def generate_elevenlabs_speech(text):
-    # Using 'George' (JbEbCmsvCUsY6W7Z4v69) - a deep, warm, articulate narrator voice
+    # Using 'George' - a deep, warm, articulate narrator voice
     voice_id = "JbEbCmsvCUsY6W7Z4v69" 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     
@@ -67,16 +67,19 @@ def generate_elevenlabs_speech(text):
     
     data = {
         "text": text,
-        "model_id": "eleven_multilingual_v2", # Multilingual supports authentic Hebrew/transliterated speech phonetics
+        "model_id": "eleven_multilingual_v2",
         "voice_settings": {
             "stability": 0.6,
             "similarity_boost": 0.85
         }
     }
     
-    response = requests.post(url, json=data, headers=headers)
-    if response.status_code == 200:
-        return response.content
+    try:
+        response = requests.post(url, json=data, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.content
+    except Exception:
+        pass # If ElevenLabs drops, pass cleanly to keep the text working
     return None
 
 if text_to_study and "primed" not in st.session_state:
@@ -110,7 +113,7 @@ user_typed = st.chat_input("Or type your response here...")
 user_message = None
 latest_bot_reply = None
 
-# Audio Processing via Whisper
+# Audio Processing via Groq's High-Speed Whisper Engine (Keeps it completely free!)
 if audio_file is not None:
     with st.spinner("Transcribing your voice..."):
         try:
@@ -153,3 +156,5 @@ if speech_text:
         audio_bytes = generate_elevenlabs_speech(speech_text)
         if audio_bytes:
             st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+        else:
+            st.warning("Voice engine unavailable. Reading chat in text mode!")
