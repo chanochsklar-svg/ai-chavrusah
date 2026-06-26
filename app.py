@@ -119,16 +119,15 @@ if user_message:
     st.session_state.messages.append({"role": "assistant", "content": bot_reply})
     st.session_state.chat_history.append(("assistant", bot_reply))
 
-# --- STABLE AUDIO CONTROLS PANEL ---
+# --- STABLE MULTILINGUAL AUDIO CONTROLS PANEL ---
 st.write("### 🎛️ Audio Controls")
 
-# Identify the text that needs to be read
 speech_text = st.session_state.chat_history[-1][1] if st.session_state.chat_history else ""
 escaped_reply = speech_text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
 
 audio_panel_html = f"""
 <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-family: sans-serif;">
-    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose & Preview a Voice:</label>
+    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose & Preview a Voice (Supports English & Hebrew Engines):</label>
     <div style="display: flex; gap: 10px; margin-bottom: 12px;">
         <select id="voiceSelect" style="flex: 3; padding: 8px; border-radius: 4px; border: 1px solid #ccc;"></select>
         <button id="btnTest" style="flex: 1; padding: 8px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">🔊 Test Voice</button>
@@ -144,26 +143,47 @@ audio_panel_html = f"""
 <script>
     var synth = window.speechSynthesis;
     var voiceSelect = document.getElementById('voiceSelect');
-    var textToSpeak = "{escaped_reply}";
+    var rawText = "{escaped_reply}";
     
-    // Save selected voice index in local browser storage so it survives page reloads!
     var savedVoiceIndex = localStorage.getItem('selectedVoiceIndex') || "";
+
+    // Phonic filter maps hard CH sounds into a structure English natural voice modules can pronounce
+    function fixTransliteration(text) {{
+        return text
+            .replace(/Chavrusah/gi, "Khav-roo-sah")
+            .replace(/Chavruta/gi, "Khav-roo-tah")
+            .replace(/Sukkah/gi, "Soo-kah")
+            .replace(/Sukkos/gi, "Soo-kos")
+            .replace(/Perek/gi, "Peh-reck")
+            .replace(/Sugya/gi, "Soog-yah")
+            .replace(/Hashem/gi, "Hah-shem")
+            .replace(/ch([aeiou])/gi, "kh$1"); // Converts generic leading 'ch' words to rough 'kh'
+    }}
 
     function populateVoiceList() {{
         var voices = synth.getVoices();
         voiceSelect.innerHTML = '';
-        var matchCount = 0;
         
+        // Sort premium/natural voices to the top (Google, Apple, Microsoft natural strings)
+        voices.sort(function(a, b) {{
+            var aName = a.name.toLowerCase();
+            var bName = b.name.toLowerCase();
+            if (aName.includes('natural') || aName.includes('google')) return -1;
+            if (bName.includes('natural') || bName.includes('google')) return 1;
+            return 0;
+        }});
+
         voices.forEach(function(voice, i) {{
-            if (voice.lang.includes('en')) {{
+            // Pull BOTH English and Hebrew speech modules
+            if (voice.lang.includes('en') || voice.lang.includes('he')) {{
                 var option = document.createElement('option');
-                option.textContent = voice.name + ' (' + voice.lang + ')';
+                var labelPrefix = voice.lang.includes('he') ? "🇮🇱 " : "🇺🇸 ";
+                option.textContent = labelPrefix + voice.name + ' (' + voice.lang + ')';
                 option.value = i;
                 if (savedVoiceIndex !== "" && savedVoiceIndex == i) {{
                     option.selected = true;
                 }}
                 voiceSelect.appendChild(option);
-                matchCount++;
             }}
         }});
     }}
@@ -173,46 +193,55 @@ audio_panel_html = f"""
         synth.onvoiceschanged = populateVoiceList;
     }}
 
-    // Voice Selection change handler
     voiceSelect.addEventListener('change', function() {{
         localStorage.setItem('selectedVoiceIndex', voiceSelect.value);
+        synth.cancel();
     }});
 
-    // Preview Test Button
+    // Test Voice Configuration Preview Action
     document.getElementById('btnTest').addEventListener('click', function() {{
         synth.cancel();
-        var testUtterance = new SpeechSynthesisUtterance("Welcome to your AI Chavrusah. Testing this voice configuration.");
+        var testText = "Testing this audio configuration. Baruch Hashem, learning Torah with clarity.";
         var voices = synth.getVoices();
-        if(voiceSelect.value !== "") {{
-            testUtterance.voice = voices[voiceSelect.value];
+        var selectedVoice = voices[voiceSelect.value];
+        
+        // If it's a native Hebrew voice player, use clean Hebrew test text instead
+        if(selectedVoice && selectedVoice.lang.includes('he')) {{
+            testText = "בָּרוּךְ הַשֵּׁם, בְּדִיקַת מַעֲרֶכֶת הַקּוֹל שֶׁלְּךָ עָבְרָה בְּהַצְלָחָה.";
+        }} else {{
+            testText = fixTransliteration(testText);
+        }}
+        
+        var testUtterance = new SpeechSynthesisUtterance(testText);
+        if(selectedVoice) {{
+            testUtterance.voice = selectedVoice;
         }}
         synth.speak(testUtterance);
     }});
 
-    // Auto-Speak on incoming responses
-    if (textToSpeak.trim() !== "" && !window.hasSpoken) {{
+    // Streamlined execution loop for incoming conversation blocks
+    if (rawText.trim() !== "" && !window.hasSpoken) {{
         synth.cancel();
-        var currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
         var voices = synth.getVoices();
-        if(voices.length > 0 && voiceSelect.value !== "") {{
-            currentUtterance.voice = voices[voiceSelect.value];
+        var selectedVoice = voices[voiceSelect.value];
+        
+        var processedText = rawText;
+        if (selectedVoice && !selectedVoice.lang.includes('he')) {{
+            processedText = fixTransliteration(rawText);
+        }}
+
+        var currentUtterance = new SpeechSynthesisUtterance(processedText);
+        if(selectedVoice) {{
+            currentUtterance.voice = selectedVoice;
         }}
         synth.speak(currentUtterance);
-        
-        // Prevent looping when clicking widgets
         window.hasSpoken = true;
     }}
 
-    // Media Control Directives
-    document.getElementById('btnPause').addEventListener('click', function() {{
-        synth.pause();
-    }});
-    document.getElementById('btnResume').addEventListener('click', function() {{
-        synth.resume();
-    }});
-    document.getElementById('btnStop').addEventListener('click', function() {{
-        synth.cancel();
-    }});
+    // Media Control Action Handlers
+    document.getElementById('btnPause').addEventListener('click', function() {{ synth.pause(); }});
+    document.getElementById('btnResume').addEventListener('click', function() {{ synth.resume(); }});
+    document.getElementById('btnStop').addEventListener('click', function() {{ synth.cancel(); }});
 </script>
 """
 
