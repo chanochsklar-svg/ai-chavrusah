@@ -83,7 +83,6 @@ audio_file = st.audio_input("Click the circle icon to record your voice:")
 user_typed = st.chat_input("Or type your response here...")
 
 user_message = None
-bot_reply = None
 
 # Audio Processing via Whisper
 if audio_file is not None:
@@ -120,17 +119,20 @@ if user_message:
     st.session_state.messages.append({"role": "assistant", "content": bot_reply})
     st.session_state.chat_history.append(("assistant", bot_reply))
 
-# --- VOICE MANAGER PANEL (Pause, Resume, Stop & Voice Select) ---
+# --- STABLE AUDIO CONTROLS PANEL ---
 st.write("### 🎛️ Audio Controls")
 
-# Prepare text for injection
-speech_text = bot_reply if bot_reply else (st.session_state.chat_history[-1][1] if st.session_state.chat_history else "")
-escaped_reply = speech_text.replace("'", "\\'").replace("\n", " ")
+# Identify the text that needs to be read
+speech_text = st.session_state.chat_history[-1][1] if st.session_state.chat_history else ""
+escaped_reply = speech_text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
 
 audio_panel_html = f"""
 <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-family: sans-serif;">
-    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose a Voice:</label>
-    <select id="voiceSelect" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 12px;"></select>
+    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose & Preview a Voice:</label>
+    <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+        <select id="voiceSelect" style="flex: 3; padding: 8px; border-radius: 4px; border: 1px solid #ccc;"></select>
+        <button id="btnTest" style="flex: 1; padding: 8px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">🔊 Test Voice</button>
+    </div>
     
     <div style="display: flex; gap: 10px;">
         <button id="btnPause" style="flex: 1; padding: 10px; background-color: #ffc107; color: black; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">⏸️ Pause</button>
@@ -143,18 +145,25 @@ audio_panel_html = f"""
     var synth = window.speechSynthesis;
     var voiceSelect = document.getElementById('voiceSelect');
     var textToSpeak = "{escaped_reply}";
-    var currentUtterance = null;
+    
+    // Save selected voice index in local browser storage so it survives page reloads!
+    var savedVoiceIndex = localStorage.getItem('selectedVoiceIndex') || "";
 
     function populateVoiceList() {{
         var voices = synth.getVoices();
         voiceSelect.innerHTML = '';
+        var matchCount = 0;
+        
         voices.forEach(function(voice, i) {{
-            // Only show English voices to keep choices clean for learning
             if (voice.lang.includes('en')) {{
                 var option = document.createElement('option');
                 option.textContent = voice.name + ' (' + voice.lang + ')';
                 option.value = i;
+                if (savedVoiceIndex !== "" && savedVoiceIndex == i) {{
+                    option.selected = true;
+                }}
                 voiceSelect.appendChild(option);
+                matchCount++;
             }}
         }});
     }}
@@ -164,20 +173,37 @@ audio_panel_html = f"""
         synth.onvoiceschanged = populateVoiceList;
     }}
 
-    // Auto-Speak when a new response arrives
-    if (textToSpeak.trim() !== "") {{
-        synth.cancel(); // Stop any leftover audio strings
-        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
-        
-        // Apply selected voice if list is populated
+    // Voice Selection change handler
+    voiceSelect.addEventListener('change', function() {{
+        localStorage.setItem('selectedVoiceIndex', voiceSelect.value);
+    }});
+
+    // Preview Test Button
+    document.getElementById('btnTest').addEventListener('click', function() {{
+        synth.cancel();
+        var testUtterance = new SpeechSynthesisUtterance("Welcome to your AI Chavrusah. Testing this voice configuration.");
+        var voices = synth.getVoices();
+        if(voiceSelect.value !== "") {{
+            testUtterance.voice = voices[voiceSelect.value];
+        }}
+        synth.speak(testUtterance);
+    }});
+
+    // Auto-Speak on incoming responses
+    if (textToSpeak.trim() !== "" && !window.hasSpoken) {{
+        synth.cancel();
+        var currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
         var voices = synth.getVoices();
         if(voices.length > 0 && voiceSelect.value !== "") {{
             currentUtterance.voice = voices[voiceSelect.value];
         }}
         synth.speak(currentUtterance);
+        
+        // Prevent looping when clicking widgets
+        window.hasSpoken = true;
     }}
 
-    // Control Selectors
+    // Media Control Directives
     document.getElementById('btnPause').addEventListener('click', function() {{
         synth.pause();
     }});
@@ -187,19 +213,7 @@ audio_panel_html = f"""
     document.getElementById('btnStop').addEventListener('click', function() {{
         synth.cancel();
     }});
-    
-    // Reroute playback if user actively switches the voice list dropdown mid-session
-    voiceSelect.addEventListener('change', function() {{
-        synth.cancel();
-        if (textToSpeak.trim() !== "") {{
-            currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
-            var voices = synth.getVoices();
-            currentUtterance.voice = voices[voiceSelect.value];
-            synth.speak(currentUtterance);
-        }}
-    }});
 </script>
 """
 
-# Render controller frame dynamically
-st.components.v1.html(audio_panel_html, height=120)
+st.components.v1.html(audio_panel_html, height=140)
