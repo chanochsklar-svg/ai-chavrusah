@@ -16,6 +16,8 @@ else:
     st.error("Please configure your GROQ_API_KEY in the dashboard secrets.")
     st.stop()
 
+ELEVENLABS_ENABLED = "ELEVENLABS_API_KEY" in st.secrets
+
 # Fixed System Prompt
 system_instruction = (
     "You are an expert, patient, and engaging AI Chavrusah (Torah study partner). "
@@ -119,133 +121,65 @@ if user_message:
     st.session_state.messages.append({"role": "assistant", "content": bot_reply})
     st.session_state.chat_history.append(("assistant", bot_reply))
 
-# --- STABLE MULTILINGUAL AUDIO CONTROLS PANEL ---
+# --- AUDIO CONTROLS PANEL (ElevenLabs — natural voice, not browser TTS) ---
 st.write("### 🎛️ Audio Controls")
 
-speech_text = st.session_state.chat_history[-1][1] if st.session_state.chat_history else ""
-escaped_reply = speech_text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
+if not ELEVENLABS_ENABLED:
+    st.caption("Add ELEVENLABS_API_KEY in your dashboard secrets to enable natural voice playback.")
+else:
+    # Pull the real voice list from the user's own ElevenLabs account so the
+    # dropdown always matches what's actually available to them.
+    if "voice_options" not in st.session_state:
+        try:
+            res = requests.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers={"xi-api-key": st.secrets["ELEVENLABS_API_KEY"]},
+                timeout=10,
+            )
+            voices = res.json().get("voices", []) if res.status_code == 200 else []
+            st.session_state.voice_options = [(v.get("name", v["voice_id"]), v["voice_id"]) for v in voices]
+        except Exception:
+            st.session_state.voice_options = []
 
-audio_panel_html = f"""
-<div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; font-family: sans-serif;">
-    <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Choose & Preview a Voice (Supports English & Hebrew Engines):</label>
-    <div style="display: flex; gap: 10px; margin-bottom: 12px;">
-        <select id="voiceSelect" style="flex: 3; padding: 8px; border-radius: 4px; border: 1px solid #ccc;"></select>
-        <button id="btnTest" style="flex: 1; padding: 8px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">🔊 Test Voice</button>
-    </div>
-    
-    <div style="display: flex; gap: 10px;">
-        <button id="btnPause" style="flex: 1; padding: 10px; background-color: #ffc107; color: black; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">⏸️ Pause</button>
-        <button id="btnResume" style="flex: 1; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">▶️ Resume</button>
-        <button id="btnStop" style="flex: 1; padding: 10px; background-color: #dc3545; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">🛑 Stop</button>
-    </div>
-</div>
+    if not st.session_state.voice_options:
+        st.caption("Couldn't load your ElevenLabs voice list.")
+    else:
+        names = [name for name, _ in st.session_state.voice_options]
+        id_by_name = dict(st.session_state.voice_options)
+        if "voice_id" not in st.session_state:
+            st.session_state.voice_id = st.session_state.voice_options[0][1]
+        current_name = next(
+            (n for n, vid in st.session_state.voice_options if vid == st.session_state.voice_id),
+            names[0],
+        )
+        chosen_name = st.selectbox("🗣️ Choose a voice (English & Hebrew supported):", names, index=names.index(current_name))
+        st.session_state.voice_id = id_by_name[chosen_name]
 
-<script>
-    var synth = window.speechSynthesis;
-    var voiceSelect = document.getElementById('voiceSelect');
-    var rawText = "{escaped_reply}";
-    
-    var savedVoiceIndex = localStorage.getItem('selectedVoiceIndex') || "";
-
-    // Corrected phonic filter keeping natural "ch" sounds
-    function fixTransliteration(text) {
-        return text
-            .replace(/Chavrusah/gi, "Chav-roo-sah")
-            .replace(/Chavruta/gi, "Chav-roo-tah")
-            .replace(/Sugya/gi, "Soog-yah")
-            .replace(/Perek/gi, "Peh-reck")
-            .replace(/Gemara/gi, "Geh-mah-rah")
-            .replace(/Mishnah/gi, "Mish-nah")
-            .replace(/Chumash/gi, "Choo-mash")
-            .replace(/Rashi/gi, "Rah-shee")
-            .replace(/Tosfos/gi, "Tose-fos")
-            .replace(/Hashem/gi, "Hah-shem")
-            .replace(/Halachah/gi, "Hah-la-chah")
-            .replace(/Halacha/gi, "Hah-la-chah")
-            .replace(/Mitzvah/gi, "Mitz-vah")
-            .replace(/Shabbat/gi, "Shah-baht")
-            .replace(/Sukkah/gi, "Soo-kah")
-            .replace(/Sukkos/gi, "Soo-kos")
-            .replace(/Baruch Hashem/gi, "Bah-ruch Hah-shem");
-    }
-
-    function populateVoiceList() {
-        var voices = synth.getVoices();
-        voiceSelect.innerHTML = '';
-        
-        voices.sort(function(a, b) {
-            var aName = a.name.toLowerCase();
-            var bName = b.name.toLowerCase();
-            if (aName.includes('natural') || aName.includes('google')) return -1;
-            if (bName.includes('natural') || bName.includes('google')) return 1;
-            return 0;
-        });
-
-        voices.forEach(function(voice, i) {
-            if (voice.lang.includes('en') || voice.lang.includes('he')) {
-                var option = document.createElement('option');
-                var labelPrefix = voice.lang.includes('he') ? "🇮🇱 " : "🇺🇸 ";
-                option.textContent = labelPrefix + voice.name + ' (' + voice.lang + ')';
-                option.value = i;
-                if (savedVoiceIndex !== "" && savedVoiceIndex == i) {
-                    option.selected = true;
-                }
-                voiceSelect.appendChild(option);
-            }
-        });
-    }
-
-    populateVoiceList();
-    if (synth.onvoiceschanged !== undefined) {
-        synth.onvoiceschanged = populateVoiceList;
-    }
-
-    voiceSelect.addEventListener('change', function() {
-        localStorage.setItem('selectedVoiceIndex', voiceSelect.value);
-        synth.cancel();
-    });
-
-    document.getElementById('btnTest').addEventListener('click', function() {
-        synth.cancel();
-        var testText = "Testing this audio configuration. Baruch Hashem, learning Torah with clarity.";
-        var voices = synth.getVoices();
-        var selectedVoice = voices[voiceSelect.value];
-        
-        if(selectedVoice && selectedVoice.lang.includes('he')) {
-            testText = "בָּרוּךְ הַשֵּׁם, בְּדִיקַת מַעֲרֶכֶת הַקּוֹל שֶׁלְּךָ עָבְרָה בְּהַצְלָחָה.";
-        } else {
-            testText = fixTransliteration(testText);
-        }
-        
-        var testUtterance = new SpeechSynthesisUtterance(testText);
-        if(selectedVoice) {
-            testUtterance.voice = selectedVoice;
-        }
-        synth.speak(testUtterance);
-    });
-
-    if (rawText.trim() !== "" && !window.hasSpoken) {
-        synth.cancel();
-        var voices = synth.getVoices();
-        var selectedVoice = voices[voiceSelect.value];
-        
-        var processedText = rawText;
-        if (selectedVoice && !selectedVoice.lang.includes('he')) {
-            processedText = fixTransliteration(rawText);
-        }
-
-        var currentUtterance = new SpeechSynthesisUtterance(processedText);
-        if(selectedVoice) {
-            currentUtterance.voice = selectedVoice;
-        }
-        synth.speak(currentUtterance);
-        window.hasSpoken = true;
-    }
-
-    document.getElementById('btnPause').addEventListener('click', function() { synth.pause(); });
-    document.getElementById('btnResume').addEventListener('click', function() { synth.resume(); });
-    document.getElementById('btnStop').addEventListener('click', function() { synth.cancel(); });
-</script>
-"""
-
-st.components.v1.html(audio_panel_html, height=140)
+        speech_text = st.session_state.chat_history[-1][1] if st.session_state.chat_history else ""
+        if speech_text:
+            try:
+                tts_response = requests.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{st.session_state.voice_id}",
+                    headers={
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                        "xi-api-key": st.secrets["ELEVENLABS_API_KEY"],
+                    },
+                    json={
+                        "text": speech_text,
+                        "model_id": "eleven_multilingual_v2",
+                        "voice_settings": {
+                            "stability": 0.45,
+                            "similarity_boost": 0.85,
+                            "style": 0.35,
+                            "use_speaker_boost": True,
+                        },
+                    },
+                    timeout=15,
+                )
+                if tts_response.status_code == 200:
+                    st.audio(tts_response.content, format="audio/mp3", autoplay=True)
+                else:
+                    st.caption("Voice generation failed for this reply.")
+            except Exception:
+                st.caption("Voice generation failed for this reply.")
