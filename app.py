@@ -55,8 +55,7 @@ text_to_study = st.text_input("What text would you like to learn today?", placeh
 
 # Helper function to generate real human speech via ElevenLabs with Safety Net
 def generate_elevenlabs_speech(text):
-    # Using 'George' - a deep, warm, articulate narrator voice
-    voice_id = "JbEbCmsvCUsY6W7Z4v69" 
+    voice_id = "JbEbCmsvCUsY6W7Z4v69" # George
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     
     headers = {
@@ -79,9 +78,10 @@ def generate_elevenlabs_speech(text):
         if response.status_code == 200:
             return response.content
     except Exception:
-        pass # If ElevenLabs drops, pass cleanly to keep the text working
+        pass 
     return None
 
+# Initialize text context/priming
 if text_to_study and "primed" not in st.session_state:
     with st.spinner("Fetching from Sefaria..."):
         source_material = fetch_sefaria(text_to_study)
@@ -96,6 +96,12 @@ if text_to_study and "primed" not in st.session_state:
         bot_reply = response.choices[0].message.content
         st.session_state.messages.append({"role": "assistant", "content": bot_reply})
         st.session_state.chat_history.append(("assistant", bot_reply))
+        
+        # Generate initial audio for the priming message
+        audio_bytes = generate_elevenlabs_speech(bot_reply)
+        if audio_bytes:
+            st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+            
         st.session_state.primed = True
 
 # Display Ongoing Chat History
@@ -106,29 +112,31 @@ for role, text in st.session_state.chat_history:
 st.write("---")
 st.subheader("🎤 Speak or Type Your Answer")
 
-# Audio Input Widgets
-audio_file = st.audio_input("Click the circle icon to record your voice:")
+# Inputs
+audio_file = st.audio_input("Click the circle icon to record your voice:", key="audio_input")
 user_typed = st.chat_input("Or type your response here...")
 
 user_message = None
-latest_bot_reply = None
 
-# Audio Processing via Groq's High-Speed Whisper Engine (Keeps it completely free!)
+# Handle Audio Input Transcription via Groq Whisper
 if audio_file is not None:
-    with st.spinner("Transcribing your voice..."):
-        try:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-large-v3",
-                file=("audio.wav", audio_file.read()),
-            )
-            user_message = transcription.text
-        except Exception as e:
-            st.error(f"Voice processing error: {e}")
+    # Use session state to prevent reprocessing the exact same audio file on rerun
+    if st.session_state.get("last_audio_file") != audio_file:
+        st.session_state.last_audio_file = audio_file
+        with st.spinner("Transcribing your voice..."):
+            try:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=("audio.wav", audio_file.read()),
+                )
+                user_message = transcription.text
+            except Exception as e:
+                st.error(f"Voice processing error: {e}")
 
 if user_typed:
     user_message = user_typed
 
-# Process message and generate text response
+# Process message and generate text response if a new user input exists
 if user_message:
     with st.chat_message("user"):
         st.write(user_message)
@@ -145,15 +153,13 @@ if user_message:
         
     with st.chat_message("assistant"):
         st.write(latest_bot_reply)
+        
     st.session_state.messages.append({"role": "assistant", "content": latest_bot_reply})
     st.session_state.chat_history.append(("assistant", latest_bot_reply))
 
-# --- PREMIUM AUDIO PLAYER PANEL ---
-speech_text = latest_bot_reply if latest_bot_reply else (st.session_state.chat_history[-1][1] if st.session_state.chat_history and st.session_state.chat_history[-1][0] == "assistant" else "")
-
-if speech_text:
+    # Generate speech only for the newly minted reply
     with st.spinner("🔊 Generating natural human voice narration..."):
-        audio_bytes = generate_elevenlabs_speech(speech_text)
+        audio_bytes = generate_elevenlabs_speech(latest_bot_reply)
         if audio_bytes:
             st.audio(audio_bytes, format="audio/mp3", autoplay=True)
         else:
